@@ -1,51 +1,51 @@
 //+------------------------------------------------------------------+
-//|                                               Communication.mqh |
+//|                  DuarteScalper\Communication.mqh                 |
 //|                                  Copyright 2024, MetaQuotes Ltd. |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, MetaQuotes Ltd."
 #property link      "https://www.mql5.com"
 #property version   "1.00"
+#property strict
 
 //+------------------------------------------------------------------+
-//| Includes e importações                                           |
+//| Includes necessários                                             |
 //+------------------------------------------------------------------+
-#include <Files\FilePipe.h>
-#include <JAson.mqh>
+#include <Files\File.mqh>
 
 //+------------------------------------------------------------------+
 //| Definições e constantes                                          |
 //+------------------------------------------------------------------+
-#define PIPE_NAME "\\\\.\\pipe\\duarte_scalper"
-#define BUFFER_SIZE 2048
-#define TIMEOUT_MS 1000
+#define DUARTE_COMM_NAME "DuarteScalper_Communication"
+#define DUARTE_BUFFER_SIZE 2048
+#define DUARTE_TIMEOUT_MS 1000
 
 // Tipos de mensagem
-enum ENUM_MESSAGE_TYPE
+enum ENUM_DUARTE_MESSAGE_TYPE
   {
-   MESSAGE_TICK_DATA = 1,
-   MESSAGE_SIGNAL_REQUEST = 2,
-   MESSAGE_SIGNAL_RESPONSE = 3,
-   MESSAGE_ORDER_REQUEST = 4,
-   MESSAGE_ORDER_RESPONSE = 5,
-   MESSAGE_STATUS_UPDATE = 6,
-   MESSAGE_CONFIG_UPDATE = 7,
-   MESSAGE_ERROR = 99
+   DUARTE_MESSAGE_TICK_DATA = 1,
+   DUARTE_MESSAGE_SIGNAL_REQUEST = 2,
+   DUARTE_MESSAGE_SIGNAL_RESPONSE = 3,
+   DUARTE_MESSAGE_ORDER_REQUEST = 4,
+   DUARTE_MESSAGE_ORDER_RESPONSE = 5,
+   DUARTE_MESSAGE_STATUS_UPDATE = 6,
+   DUARTE_MESSAGE_CONFIG_UPDATE = 7,
+   DUARTE_MESSAGE_ERROR = 99
   };
 
 // Status da comunicação
-enum ENUM_COMM_STATUS
+enum ENUM_DUARTE_COMM_STATUS
   {
-   COMM_DISCONNECTED = 0,
-   COMM_CONNECTING = 1,
-   COMM_CONNECTED = 2,
-   COMM_ERROR = 3
+   DUARTE_COMM_DISCONNECTED = 0,
+   DUARTE_COMM_CONNECTING = 1,
+   DUARTE_COMM_CONNECTED = 2,
+   DUARTE_COMM_ERROR = 3
   };
 
 //+------------------------------------------------------------------+
-//| Estrutura para dados de tick                                     |
+//| Estruturas de dados                                              |
 //+------------------------------------------------------------------+
-struct TickData
+struct DuarteTickData
   {
    string            symbol;
    datetime          time;
@@ -57,23 +57,17 @@ struct TickData
    int               direction;
   };
 
-//+------------------------------------------------------------------+
-//| Estrutura para sinal de entrada                                  |
-//+------------------------------------------------------------------+
-struct SignalData
+struct DuarteSignalData
   {
    string            symbol;
    int               direction;        // 1=BUY, -1=SELL, 0=HOLD
-   double            confidence;    // 0.0 - 1.0
-   double            expected_move; // Expected price movement
+   double            confidence;       // 0.0 - 1.0
+   double            expected_move;    // Expected price movement
    int               time_horizon;     // Time horizon in seconds
    datetime          timestamp;
   };
 
-//+------------------------------------------------------------------+
-//| Estrutura para ordem                                             |
-//+------------------------------------------------------------------+
-struct OrderData
+struct DuarteOrderData
   {
    string            symbol;
    int               operation;        // ORDER_TYPE_BUY or ORDER_TYPE_SELL
@@ -91,16 +85,12 @@ struct OrderData
 class CDuarteCommunication
   {
 private:
-   CFilePipe*        m_pipe;
-   ENUM_COMM_STATUS  m_status;
-   string            m_pipe_name;
+   string            m_outbox_path;
+   string            m_inbox_path;
+   ENUM_DUARTE_COMM_STATUS m_status;
    datetime          m_last_heartbeat;
    int               m_connection_attempts;
    bool              m_debug_mode;
-
-   // Buffers
-   string            m_send_buffer;
-   string            m_receive_buffer;
 
    // Estatísticas
    ulong             m_messages_sent;
@@ -108,38 +98,40 @@ private:
    ulong             m_errors_count;
 
    // Métodos privados
-   bool              CreatePipe();
-   bool              ConnectToPipe();
-   void              ClosePipe();
-   string            FormatTickMessage(const TickData& tick);
-   string            FormatSignalRequest(const string& symbol);
-   bool              ParseSignalResponse(const string& json, SignalData& signal);
-   bool              ParseOrderResponse(const string& json);
-   void              LogMessage(const string& message, bool is_error = false);
+   bool              CreateCommunicationFiles();
+   string            FormatTickMessage(const DuarteTickData& tick);
+   string            FormatSignalRequest(const string symbol);
+   bool              ParseSignalResponse(const string json, DuarteSignalData& signal);
+   void              LogMessage(const string message, bool is_error = false);
    string            GetCurrentTimestamp();
+   string            CreateJsonString(const string key, const string value);
+   string            CreateJsonInt(const string key, long value);
+   string            CreateJsonDouble(const string key, double value);
+   bool              WriteToOutbox(const string message);
+   string            ReadFromInbox();
 
 public:
    // Construtor e destrutor
                      CDuarteCommunication();
                     ~CDuarteCommunication();
 
-   // Métodos públicos
-   bool              Initialize(const string& pipe_name = PIPE_NAME);
+   // Métodos principais
+   bool              Initialize(const string comm_name = DUARTE_COMM_NAME);
    void              Shutdown();
-   bool              IsConnected() { return m_status == COMM_CONNECTED; }
-   ENUM_COMM_STATUS  GetStatus() { return m_status; }
+   bool              IsConnected() { return m_status == DUARTE_COMM_CONNECTED; }
+   ENUM_DUARTE_COMM_STATUS GetStatus() { return m_status; }
 
-   // Comunicação principal
-   bool              SendTickData(const TickData& tick);
-   bool              RequestSignal(const string& symbol, SignalData& signal);
-   bool              SendOrderRequest(const OrderData& order);
-   bool              SendStatusUpdate(const string& status, const string& details = "");
+   // Comunicação
+   bool              SendTickData(const DuarteTickData& tick);
+   bool              RequestSignal(const string symbol, DuarteSignalData& signal);
+   bool              SendOrderRequest(const DuarteOrderData& order);
+   bool              SendStatusUpdate(const string status, const string details = "");
 
    // Configuração
    void              SetDebugMode(bool enabled) { m_debug_mode = enabled; }
-   bool              UpdateConfig(const string& key, const string& value);
+   bool              UpdateConfig(const string key, const string value);
 
-   // Heartbeat e manutenção
+   // Manutenção
    void              SendHeartbeat();
    bool              CheckConnection();
    void              ResetConnection();
@@ -149,18 +141,22 @@ public:
    string            GetStatusReport();
 
    // Utilitários
-   static string     JsonEscape(const string& text);
+   static string     JsonEscape(const string text);
    static double     NormalizePrice(double price, int digits);
   };
+
+//+------------------------------------------------------------------+
+//| Implementação da classe                                          |
+//+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
 //| Construtor                                                       |
 //+------------------------------------------------------------------+
 CDuarteCommunication::CDuarteCommunication()
   {
-   m_pipe = NULL;
-   m_status = COMM_DISCONNECTED;
-   m_pipe_name = PIPE_NAME;
+   m_outbox_path = "";
+   m_inbox_path = "";
+   m_status = DUARTE_COMM_DISCONNECTED;
    m_last_heartbeat = 0;
    m_connection_attempts = 0;
    m_debug_mode = false;
@@ -178,135 +174,167 @@ CDuarteCommunication::~CDuarteCommunication()
   }
 
 //+------------------------------------------------------------------+
-//| Inicializa a comunicação                                         |
+//| Inicialização                                                    |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::Initialize(const string& pipe_name = PIPE_NAME)
+bool CDuarteCommunication::Initialize(const string comm_name = DUARTE_COMM_NAME)
   {
-   if(m_status == COMM_CONNECTED)
+   if(m_status == DUARTE_COMM_CONNECTED)
      {
       LogMessage("Communication already initialized");
       return true;
      }
 
-   m_pipe_name = pipe_name;
-   m_status = COMM_CONNECTING;
+   // Definir caminhos dos arquivos
+   m_outbox_path = "DuarteScalper\\" + comm_name + "_outbox.json";
+   m_inbox_path = "DuarteScalper\\" + comm_name + "_inbox.json";
+   
+   m_status = DUARTE_COMM_CONNECTING;
+   LogMessage("Initializing communication: " + comm_name);
 
-   LogMessage("Initializing communication with pipe: " + m_pipe_name);
-
-// Criar pipe
-   if(!CreatePipe())
+   // Criar arquivos de comunicação
+   if(!CreateCommunicationFiles())
      {
-      LogMessage("Failed to create pipe", true);
-      m_status = COMM_ERROR;
+      LogMessage("Failed to create communication files", true);
+      m_status = DUARTE_COMM_ERROR;
       return false;
      }
 
-// Tentar conectar
-   for(int i = 0; i < 5; i++)
+   // Tentar estabelecer comunicação
+   for(int i = 0; i < 3; i++)
      {
-      if(ConnectToPipe())
+      if(WriteToOutbox("{\"type\":6,\"status\":\"INIT\",\"message\":\"MT5 Ready\"}"))
         {
-         m_status = COMM_CONNECTED;
+         m_status = DUARTE_COMM_CONNECTED;
          m_last_heartbeat = TimeCurrent();
          LogMessage("Communication initialized successfully");
          return true;
         }
-
-      Sleep(1000); // Aguardar 1 segundo entre tentativas
+      
+      Sleep(1000);
       m_connection_attempts++;
      }
 
-   m_status = COMM_ERROR;
-   LogMessage("Failed to connect after 5 attempts", true);
+   m_status = DUARTE_COMM_ERROR;
+   LogMessage("Failed to initialize communication", true);
    return false;
   }
 
 //+------------------------------------------------------------------+
-//| Finaliza a comunicação                                           |
+//| Finalização                                                      |
 //+------------------------------------------------------------------+
 void CDuarteCommunication::Shutdown()
   {
-   if(m_status != COMM_DISCONNECTED)
+   if(m_status != DUARTE_COMM_DISCONNECTED)
      {
       LogMessage("Shutting down communication");
-      ClosePipe();
-      m_status = COMM_DISCONNECTED;
+      WriteToOutbox("{\"type\":6,\"status\":\"SHUTDOWN\",\"message\":\"MT5 Disconnecting\"}");
+      m_status = DUARTE_COMM_DISCONNECTED;
      }
   }
 
 //+------------------------------------------------------------------+
-//| Cria o pipe                                                      |
+//| Criar arquivos de comunicação                                    |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::CreatePipe()
+bool CDuarteCommunication::CreateCommunicationFiles()
   {
-   if(m_pipe != NULL)
+   // Criar diretório DuarteScalper se não existir
+   if(!FolderCreate("DuarteScalper", FILE_COMMON))
      {
-      delete m_pipe;
-      m_pipe = NULL;
+      // Se der erro, verificar se já existe
+      if(GetLastError() != 5018) // ERROR_DIRECTORY_ALREADY_EXISTS = 5018
+        {
+         LogMessage("Failed to create DuarteScalper directory", true);
+         return false;
+        }
      }
 
-   m_pipe = new CFilePipe();
-   if(m_pipe == NULL)
+   // Criar arquivo outbox se não existir
+   if(!FileIsExist(m_outbox_path, FILE_COMMON))
      {
-      LogMessage("Failed to create pipe object", true);
-      return false;
+      int handle = FileOpen(m_outbox_path, FILE_WRITE | FILE_TXT | FILE_COMMON);
+      if(handle == INVALID_HANDLE)
+        {
+         LogMessage("Failed to create outbox file", true);
+         return false;
+        }
+      FileClose(handle);
+     }
+
+   // Criar arquivo inbox se não existir
+   if(!FileIsExist(m_inbox_path, FILE_COMMON))
+     {
+      int handle = FileOpen(m_inbox_path, FILE_WRITE | FILE_TXT | FILE_COMMON);
+      if(handle == INVALID_HANDLE)
+        {
+         LogMessage("Failed to create inbox file", true);
+         return false;
+        }
+      FileClose(handle);
      }
 
    return true;
   }
 
 //+------------------------------------------------------------------+
-//| Conecta ao pipe                                                  |
+//| Escrever no arquivo outbox                                       |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::ConnectToPipe()
+bool CDuarteCommunication::WriteToOutbox(const string message)
   {
-   if(m_pipe == NULL)
+   int handle = FileOpen(m_outbox_path, FILE_WRITE | FILE_TXT | FILE_COMMON);
+   if(handle == INVALID_HANDLE)
+     {
+      LogMessage("Failed to open outbox for writing", true);
       return false;
-
-// Tentar abrir pipe existente primeiro (cliente)
-   if(m_pipe.Open(m_pipe_name, FILE_READ | FILE_WRITE | FILE_BIN))
-     {
-      LogMessage("Connected to existing pipe");
-      return true;
      }
 
-// Se não conseguir, criar novo pipe (servidor)
-   if(m_pipe.Open(m_pipe_name, FILE_WRITE | FILE_READ | FILE_BIN | FILE_PIPE))
-     {
-      LogMessage("Created new pipe");
-      return true;
-     }
+   bool result = (FileWriteString(handle, message + "\n") > 0);
+   FileFlush(handle);
+   FileClose(handle);
 
-   LogMessage("Failed to open pipe: " + IntegerToString(GetLastError()), true);
-   return false;
+   return result;
   }
 
 //+------------------------------------------------------------------+
-//| Fecha o pipe                                                     |
+//| Ler do arquivo inbox                                             |
 //+------------------------------------------------------------------+
-void CDuarteCommunication::ClosePipe()
+string CDuarteCommunication::ReadFromInbox()
   {
-   if(m_pipe != NULL)
+   if(!FileIsExist(m_inbox_path, FILE_COMMON))
+      return "";
+
+   int handle = FileOpen(m_inbox_path, FILE_READ | FILE_TXT | FILE_COMMON);
+   if(handle == INVALID_HANDLE)
+      return "";
+
+   string result = "";
+   if(FileSize(handle) > 0)
      {
-      m_pipe.Close();
-      delete m_pipe;
-      m_pipe = NULL;
+      result = FileReadString(handle);
+      
+      // Limpar o arquivo após leitura
+      FileClose(handle);
+      handle = FileOpen(m_inbox_path, FILE_WRITE | FILE_TXT | FILE_COMMON);
+      FileClose(handle);
      }
+   else
+     {
+      FileClose(handle);
+     }
+
+   return result;
   }
 
 //+------------------------------------------------------------------+
-//| Envia dados de tick                                              |
+//| Enviar dados de tick                                             |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::SendTickData(const TickData& tick)
+bool CDuarteCommunication::SendTickData(const DuarteTickData& tick)
   {
    if(!IsConnected())
       return false;
 
    string message = FormatTickMessage(tick);
-
-// Escrever no pipe
-   uint bytes_written = m_pipe.WriteString(message);
-   if(bytes_written > 0)
+   
+   if(WriteToOutbox(message))
      {
       m_messages_sent++;
       if(m_debug_mode)
@@ -316,77 +344,72 @@ bool CDuarteCommunication::SendTickData(const TickData& tick)
    else
      {
       m_errors_count++;
-      LogMessage("Failed to send tick data for " + tick.symbol, true);
+      LogMessage("Failed to send tick data", true);
       return false;
      }
   }
 
 //+------------------------------------------------------------------+
-//| Solicita sinal para um símbolo                                   |
+//| Solicitar sinal                                                  |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::RequestSignal(const string& symbol, SignalData& signal)
+bool CDuarteCommunication::RequestSignal(const string symbol, DuarteSignalData& signal)
   {
    if(!IsConnected())
       return false;
 
-// Enviar solicitação
+   // Enviar solicitação
    string request = FormatSignalRequest(symbol);
-   uint bytes_written = m_pipe.WriteString(request);
-
-   if(bytes_written == 0)
+   if(!WriteToOutbox(request))
      {
       m_errors_count++;
-      LogMessage("Failed to send signal request for " + symbol, true);
+      LogMessage("Failed to send signal request", true);
       return false;
      }
 
-// Aguardar resposta
-   Sleep(100); // Pequena pausa para resposta
-
-   string response;
-   uint bytes_read = m_pipe.ReadString(response);
-
-   if(bytes_read > 0)
+   // Aguardar resposta
+   for(int i = 0; i < 10; i++) // 10 tentativas, 100ms cada = 1 segundo total
      {
-      m_messages_received++;
-      if(ParseSignalResponse(response, signal))
+      Sleep(100);
+      
+      string response = ReadFromInbox();
+      if(response != "")
         {
-         if(m_debug_mode)
-            LogMessage("Signal received for " + symbol + ": " + IntegerToString(signal.direction));
-         return true;
+         m_messages_received++;
+         if(ParseSignalResponse(response, signal))
+           {
+            if(m_debug_mode)
+               LogMessage("Signal received: " + symbol + " = " + IntegerToString(signal.direction));
+            return true;
+           }
         }
      }
 
-   m_errors_count++;
-   LogMessage("Failed to receive signal for " + symbol, true);
+   LogMessage("Signal timeout for " + symbol, true);
    return false;
   }
 
 //+------------------------------------------------------------------+
-//| Envia solicitação de ordem                                       |
+//| Enviar ordem                                                     |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::SendOrderRequest(const OrderData& order)
+bool CDuarteCommunication::SendOrderRequest(const DuarteOrderData& order)
   {
    if(!IsConnected())
       return false;
 
-// Construir JSON da ordem
-   CJAVal json;
-   json["type"] = MESSAGE_ORDER_REQUEST;
-   json["timestamp"] = GetCurrentTimestamp();
-   json["symbol"] = order.symbol;
-   json["operation"] = order.operation;
-   json["volume"] = order.volume;
-   json["price"] = order.price;
-   json["sl"] = order.sl;
-   json["tp"] = order.tp;
-   json["comment"] = order.comment;
-   json["magic"] = (long)order.magic;
+   string message = "{" +
+                    CreateJsonInt("type", DUARTE_MESSAGE_ORDER_REQUEST) + "," +
+                    CreateJsonString("timestamp", GetCurrentTimestamp()) + "," +
+                    CreateJsonString("symbol", order.symbol) + "," +
+                    CreateJsonInt("operation", order.operation) + "," +
+                    CreateJsonDouble("volume", order.volume) + "," +
+                    CreateJsonDouble("price", order.price) + "," +
+                    CreateJsonDouble("sl", order.sl) + "," +
+                    CreateJsonDouble("tp", order.tp) + "," +
+                    CreateJsonString("comment", order.comment) + "," +
+                    CreateJsonInt("magic", (long)order.magic) +
+                    "}";
 
-   string message = json.Serialize();
-   uint bytes_written = m_pipe.WriteString(message);
-
-   if(bytes_written > 0)
+   if(WriteToOutbox(message))
      {
       m_messages_sent++;
       if(m_debug_mode)
@@ -402,24 +425,22 @@ bool CDuarteCommunication::SendOrderRequest(const OrderData& order)
   }
 
 //+------------------------------------------------------------------+
-//| Envia atualização de status                                      |
+//| Enviar status                                                    |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::SendStatusUpdate(const string& status, const string& details = "")
+bool CDuarteCommunication::SendStatusUpdate(const string status, const string details = "")
   {
    if(!IsConnected())
       return false;
 
-   CJAVal json;
-   json["type"] = MESSAGE_STATUS_UPDATE;
-   json["timestamp"] = GetCurrentTimestamp();
-   json["status"] = status;
-   json["details"] = details;
-   json["expert_id"] = "DUARTE-SCALPER";
+   string message = "{" +
+                    CreateJsonInt("type", DUARTE_MESSAGE_STATUS_UPDATE) + "," +
+                    CreateJsonString("timestamp", GetCurrentTimestamp()) + "," +
+                    CreateJsonString("status", status) + "," +
+                    CreateJsonString("details", details) + "," +
+                    CreateJsonString("expert_id", "DUARTE-SCALPER") +
+                    "}";
 
-   string message = json.Serialize();
-   uint bytes_written = m_pipe.WriteString(message);
-
-   if(bytes_written > 0)
+   if(WriteToOutbox(message))
      {
       m_messages_sent++;
       return true;
@@ -432,96 +453,98 @@ bool CDuarteCommunication::SendStatusUpdate(const string& status, const string& 
   }
 
 //+------------------------------------------------------------------+
-//| Formata mensagem de tick                                         |
+//| Formatar mensagem de tick                                        |
 //+------------------------------------------------------------------+
-string CDuarteCommunication::FormatTickMessage(const TickData& tick)
+string CDuarteCommunication::FormatTickMessage(const DuarteTickData& tick)
   {
-   CJAVal json;
-   json["type"] = MESSAGE_TICK_DATA;
-   json["timestamp"] = GetCurrentTimestamp();
-   json["symbol"] = tick.symbol;
-   json["time"] = (long)tick.time;
-   json["bid"] = tick.bid;
-   json["ask"] = tick.ask;
-   json["last"] = tick.last;
-   json["volume"] = (long)tick.volume;
-   json["spread"] = tick.spread;
-   json["direction"] = tick.direction;
-
-   return json.Serialize();
+   return "{" +
+          CreateJsonInt("type", DUARTE_MESSAGE_TICK_DATA) + "," +
+          CreateJsonString("timestamp", GetCurrentTimestamp()) + "," +
+          CreateJsonString("symbol", tick.symbol) + "," +
+          CreateJsonInt("time", (long)tick.time) + "," +
+          CreateJsonDouble("bid", tick.bid) + "," +
+          CreateJsonDouble("ask", tick.ask) + "," +
+          CreateJsonDouble("last", tick.last) + "," +
+          CreateJsonInt("volume", (long)tick.volume) + "," +
+          CreateJsonDouble("spread", tick.spread) + "," +
+          CreateJsonInt("direction", tick.direction) +
+          "}";
   }
 
 //+------------------------------------------------------------------+
-//| Formata solicitação de sinal                                     |
+//| Formatar solicitação de sinal                                    |
 //+------------------------------------------------------------------+
-string CDuarteCommunication::FormatSignalRequest(const string& symbol)
+string CDuarteCommunication::FormatSignalRequest(const string symbol)
   {
-   CJAVal json;
-   json["type"] = MESSAGE_SIGNAL_REQUEST;
-   json["timestamp"] = GetCurrentTimestamp();
-   json["symbol"] = symbol;
-   json["request_id"] = GetTickCount();
-
-   return json.Serialize();
+   return "{" +
+          CreateJsonInt("type", DUARTE_MESSAGE_SIGNAL_REQUEST) + "," +
+          CreateJsonString("timestamp", GetCurrentTimestamp()) + "," +
+          CreateJsonString("symbol", symbol) + "," +
+          CreateJsonInt("request_id", GetTickCount()) +
+          "}";
   }
 
 //+------------------------------------------------------------------+
 //| Parse resposta de sinal                                          |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::ParseSignalResponse(const string& json_str, SignalData& signal)
+bool CDuarteCommunication::ParseSignalResponse(const string json_str, DuarteSignalData& signal)
   {
-   CJAVal json;
-   if(!json.Deserialize(json_str))
-     {
-      LogMessage("Failed to parse signal response JSON", true);
+   // Verificar se é resposta de sinal
+   if(StringFind(json_str, "\"type\":" + IntegerToString(DUARTE_MESSAGE_SIGNAL_RESPONSE)) < 0)
       return false;
+
+   // Extrair symbol
+   int pos = StringFind(json_str, "\"symbol\":");
+   if(pos >= 0)
+     {
+      pos = StringFind(json_str, "\"", pos + 9) + 1;
+      int end_pos = StringFind(json_str, "\"", pos);
+      if(end_pos > pos)
+         signal.symbol = StringSubstr(json_str, pos, end_pos - pos);
      }
 
-// Verificar tipo de mensagem
-   if(json["type"].ToInt() != MESSAGE_SIGNAL_RESPONSE)
+   // Extrair direction
+   pos = StringFind(json_str, "\"direction\":");
+   if(pos >= 0)
      {
-      LogMessage("Invalid message type in signal response", true);
-      return false;
+      pos += 12;
+      int end_pos = StringFind(json_str, ",", pos);
+      if(end_pos < 0) end_pos = StringFind(json_str, "}", pos);
+      if(end_pos > pos)
+         signal.direction = (int)StringToInteger(StringSubstr(json_str, pos, end_pos - pos));
      }
 
-// Extrair dados do sinal
-   signal.symbol = json["symbol"].ToStr();
-   signal.direction = json["direction"].ToInt();
-   signal.confidence = json["confidence"].ToDbl();
-   signal.expected_move = json["expected_move"].ToDbl();
-   signal.time_horizon = json["time_horizon"].ToInt();
+   // Extrair confidence
+   pos = StringFind(json_str, "\"confidence\":");
+   if(pos >= 0)
+     {
+      pos += 13;
+      int end_pos = StringFind(json_str, ",", pos);
+      if(end_pos < 0) end_pos = StringFind(json_str, "}", pos);
+      if(end_pos > pos)
+         signal.confidence = StringToDouble(StringSubstr(json_str, pos, end_pos - pos));
+     }
+
    signal.timestamp = TimeCurrent();
-
    return true;
   }
 
 //+------------------------------------------------------------------+
-//| Atualiza configuração                                            |
+//| Configurar                                                       |
 //+------------------------------------------------------------------+
-bool CDuarteCommunication::UpdateConfig(const string& key, const string& value)
+bool CDuarteCommunication::UpdateConfig(const string key, const string value)
   {
    if(!IsConnected())
       return false;
 
-   CJAVal json;
-   json["type"] = MESSAGE_CONFIG_UPDATE;
-   json["timestamp"] = GetCurrentTimestamp();
-   json["key"] = key;
-   json["value"] = value;
+   string message = "{" +
+                    CreateJsonInt("type", DUARTE_MESSAGE_CONFIG_UPDATE) + "," +
+                    CreateJsonString("timestamp", GetCurrentTimestamp()) + "," +
+                    CreateJsonString("key", key) + "," +
+                    CreateJsonString("value", value) +
+                    "}";
 
-   string message = json.Serialize();
-   uint bytes_written = m_pipe.WriteString(message);
-
-   if(bytes_written > 0)
-     {
-      m_messages_sent++;
-      return true;
-     }
-   else
-     {
-      m_errors_count++;
-      return false;
-     }
+   return WriteToOutbox(message);
   }
 
 //+------------------------------------------------------------------+
@@ -544,11 +567,11 @@ bool CDuarteCommunication::CheckConnection()
    if(!IsConnected())
       return false;
 
-// Verificar se heartbeat não está muito antigo
-   if(TimeCurrent() - m_last_heartbeat > 60) // 60 segundos sem heartbeat
+   // Verificar timeout do heartbeat
+   if(TimeCurrent() - m_last_heartbeat > 60)
      {
       LogMessage("Connection timeout - no heartbeat", true);
-      m_status = COMM_ERROR;
+      m_status = DUARTE_COMM_ERROR;
       return false;
      }
 
@@ -563,7 +586,7 @@ void CDuarteCommunication::ResetConnection()
    LogMessage("Resetting connection");
    Shutdown();
    Sleep(1000);
-   Initialize(m_pipe_name);
+   Initialize();
   }
 
 //+------------------------------------------------------------------+
@@ -577,76 +600,58 @@ void CDuarteCommunication::GetStatistics(ulong& sent, ulong& received, ulong& er
   }
 
 //+------------------------------------------------------------------+
-//| Gerar relatório de status                                        |
+//| Relatório de status                                              |
 //+------------------------------------------------------------------+
 string CDuarteCommunication::GetStatusReport()
   {
    string status_text;
-
    switch(m_status)
      {
-      case COMM_DISCONNECTED:
-         status_text = "DISCONNECTED";
-         break;
-      case COMM_CONNECTING:
-         status_text = "CONNECTING";
-         break;
-      case COMM_CONNECTED:
-         status_text = "CONNECTED";
-         break;
-      case COMM_ERROR:
-         status_text = "ERROR";
-         break;
-      default:
-         status_text = "UNKNOWN";
+      case DUARTE_COMM_DISCONNECTED: status_text = "DISCONNECTED"; break;
+      case DUARTE_COMM_CONNECTING: status_text = "CONNECTING"; break;
+      case DUARTE_COMM_CONNECTED: status_text = "CONNECTED"; break;
+      case DUARTE_COMM_ERROR: status_text = "ERROR"; break;
+      default: status_text = "UNKNOWN";
      }
 
-   string report = StringFormat(
-                      "Communication Status: %s\n" +
-                      "Messages Sent: %d\n" +
-                      "Messages Received: %d\n" +
-                      "Errors: %d\n" +
-                      "Last Heartbeat: %s\n" +
-                      "Connection Attempts: %d",
-                      status_text,
-                      m_messages_sent,
-                      m_messages_received,
-                      m_errors_count,
-                      TimeToString(m_last_heartbeat),
-                      m_connection_attempts
-                   );
-
-   return report;
+   return StringFormat(
+             "Communication Status: %s\n" +
+             "Messages Sent: %d\n" +
+             "Messages Received: %d\n" +
+             "Errors: %d\n" +
+             "Last Heartbeat: %s",
+             status_text,
+             m_messages_sent,
+             m_messages_received,
+             m_errors_count,
+             TimeToString(m_last_heartbeat)
+          );
   }
 
 //+------------------------------------------------------------------+
 //| Log de mensagem                                                  |
 //+------------------------------------------------------------------+
-void CDuarteCommunication::LogMessage(const string& message, bool is_error = false)
+void CDuarteCommunication::LogMessage(const string message, bool is_error = false)
   {
    string prefix = is_error ? "[ERROR] " : "[INFO] ";
    string full_message = prefix + "DuarteComm: " + message;
 
-   if(is_error)
+   if(is_error || m_debug_mode)
       Print(full_message);
-   else
-      if(m_debug_mode)
-         Print(full_message);
   }
 
 //+------------------------------------------------------------------+
-//| Obter timestamp atual                                            |
+//| Timestamp atual                                                  |
 //+------------------------------------------------------------------+
 string CDuarteCommunication::GetCurrentTimestamp()
   {
-   return TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS) + "." +
-          IntegerToString(GetMicrosecondCount() % 1000, 3, '0');
+   return TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS);
   }
 
 //+------------------------------------------------------------------+
-//| Escape de caracteres JSON                                        |
+//| Escape JSON                                                      |
 //+------------------------------------------------------------------+
-static string CDuarteCommunication::JsonEscape(const string& text)
+static string CDuarteCommunication::JsonEscape(const string text)
   {
    string result = text;
    StringReplace(result, "\\", "\\\\");
@@ -666,7 +671,31 @@ static double CDuarteCommunication::NormalizePrice(double price, int digits)
   }
 
 //+------------------------------------------------------------------+
-//| Classe para facilitar envio de dados                             |
+//| Criar JSON string                                                |
+//+------------------------------------------------------------------+
+string CDuarteCommunication::CreateJsonString(const string key, const string value)
+  {
+   return "\"" + key + "\":\"" + JsonEscape(value) + "\"";
+  }
+
+//+------------------------------------------------------------------+
+//| Criar JSON int                                                   |
+//+------------------------------------------------------------------+
+string CDuarteCommunication::CreateJsonInt(const string key, long value)
+  {
+   return "\"" + key + "\":" + IntegerToString(value);
+  }
+
+//+------------------------------------------------------------------+
+//| Criar JSON double                                                |
+//+------------------------------------------------------------------+
+string CDuarteCommunication::CreateJsonDouble(const string key, double value)
+  {
+   return "\"" + key + "\":" + DoubleToString(value, 8);
+  }
+
+//+------------------------------------------------------------------+
+//| Classe auxiliar para envio de dados                              |
 //+------------------------------------------------------------------+
 class CDuarteDataSender
   {
@@ -676,7 +705,7 @@ private:
    datetime          m_last_tick_time;
 
 public:
-                     CDuarteDataSender(CDuarteCommunication* comm, const string& symbol)
+                     CDuarteDataSender(CDuarteCommunication* comm, const string symbol)
      {
       m_comm = comm;
       m_symbol = symbol;
@@ -689,14 +718,14 @@ public:
       if(!SymbolInfoTick(m_symbol, tick))
          return false;
 
-      // Evitar envio de ticks duplicados
-      if(tick.time == m_last_tick_time)
+      // Evitar ticks duplicados
+      if(tick.time <= m_last_tick_time)
          return true;
 
       m_last_tick_time = tick.time;
 
-      // Converter para estrutura TickData
-      TickData tick_data;
+      // Converter para DuarteTickData
+      DuarteTickData tick_data;
       tick_data.symbol = m_symbol;
       tick_data.time = tick.time;
       tick_data.bid = tick.bid;
@@ -705,17 +734,16 @@ public:
       tick_data.volume = tick.volume;
       tick_data.spread = tick.ask - tick.bid;
 
-      // Calcular direção (simplificado)
+      // Calcular direção
       static double last_price = 0;
       if(last_price > 0)
         {
          if(tick.last > last_price)
             tick_data.direction = 1;
+         else if(tick.last < last_price)
+            tick_data.direction = -1;
          else
-            if(tick.last < last_price)
-               tick_data.direction = -1;
-            else
-               tick_data.direction = 0;
+            tick_data.direction = 0;
         }
       else
          tick_data.direction = 0;
@@ -725,11 +753,10 @@ public:
       return m_comm.SendTickData(tick_data);
      }
 
-   bool              RequestTradeSignal(SignalData& signal)
+   bool              RequestTradeSignal(DuarteSignalData& signal)
      {
       return m_comm.RequestSignal(m_symbol, signal);
      }
   };
 
-//+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
