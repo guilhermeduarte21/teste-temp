@@ -152,7 +152,7 @@ class DuarteDeployment:
         
         config = {
             "mt5_path": str(self.selected_mt5_path),
-            "last_deployment": str(Path.now()),
+            "last_deployment": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "deployed_files": [
                 "Include/DuarteScalper/Communication.mqh",
                 "Experts/DuarteScalper/DuarteScalerBase.mq5",
@@ -160,11 +160,6 @@ class DuarteDeployment:
             ],
             "deployment_notes": "Estrutura atualizada para Duarte-Scalper"
         }
-        
-        with open(config_file, 'w') as f:
-            json.dump(config, f, indent=4)
-        
-        print(f"💾 Config salva: {config_file}")
     
     def run_deployment(self):
         """Executa deployment completo"""
