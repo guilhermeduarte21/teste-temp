@@ -1,0 +1,125 @@
+# DUARTE-SCALPER - .gitignore Principal
+# Este arquivo deve estar na raiz do projeto DuarteScalper/
+
+# === DADOS SENSÍVEIS ===
+# Nunca versionar dados de trading
+data/raw/
+data/processed/
+data/backup/
+logs/
+*.log
+
+# Configurações com dados sensíveis
+config/secrets.yaml
+config/broker_config.yaml
+*.env
+
+# === MODELOS E CACHE ===
+# Modelos treinados podem ser grandes
+data/models/*.pkl
+data/models/*.h5
+data/models/*.joblib
+*.model
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# === AMBIENTES VIRTUAIS ===
+# Excluir ambientes virtuais
+venv/
+venv_duarte/
+.venv/
+env/
+.env/
+
+# === IDEs E EDITORES ===
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+.idea_modules/
+*.iml
+*.ipr
+*.iws
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# === SISTEMA OPERACIONAL ===
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# === BUILDS E TEMPORÁRIOS ===
+# Builds
+build/
+dist/
+*.egg-info/
+
+# Temporários
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# === TESTES ===
+# Coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# === MT5 ESPECÍFICO ===
+# Arquivos do MT5 que não devem ser versionados
+*.ex5
+*.mqh~
+*.mq5~
+
+# === BACKUP E DOCUMENTAÇÃO ===
+# Backups automáticos
+*.bak
+*.backup
+*.orig
+
+# Documentação gerada automaticamente
+docs/_build/
+docs/build/
+
+# === RESULTADOS DE BACKTESTING ===
+# Relatórios de backtesting podem ser grandes
+backtest_results/
+*.html
+*.pdf
+
+# === OUTROS ===
+# Arquivos de configuração local
+.local/
+local_config.yaml
+
+# Profiles de performance
+.prof
