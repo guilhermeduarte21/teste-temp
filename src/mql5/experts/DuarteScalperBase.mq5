@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                     DuarteScalerBase.mq5         |
+//|                                     DuarteScalperBase.mq5         |
 //|                           Duarte-Scalper Base Expert Advisor     |
 //|                                      https://www.duarte.com      |
 //+------------------------------------------------------------------+
@@ -16,43 +16,45 @@
 #include <Trade\SymbolInfo.mqh>
 #include <Trade\PositionInfo.mqh>
 #include <Trade\AccountInfo.mqh>
+#include <Trade\HistoryOrderInfo.mqh>
+#include <Trade\DealInfo.mqh>
 
 //+------------------------------------------------------------------+
 //| Input parameters                                                 |
 //+------------------------------------------------------------------+
 input group "=== CONFIGURAÇÕES PRINCIPAIS ==="
-input string InpSymbols = "WINM25,WDOM25";          // Símbolos para negociar
-input double InpLotSize = 1.0;                       // Tamanho do lote
-input int    InpMagicNumber = 778899;                // Magic Number
+input string InpSymbolsPrefix = "WIN*,WDO*";             // Prefixos dos símbolos (suporta wildcards)
+input double InpLotSize = 1.0;                           // Tamanho do lote
+input int    InpMagicNumber = 778899;                    // Magic Number
 
 input group "=== RISK MANAGEMENT ==="
-input double InpMaxRiskPerTrade = 0.01;              // Risco máximo por trade (%)
-input double InpMaxDailyLoss = 0.03;                 // Perda máxima diária (%)
-input int    InpMaxConsecutiveLosses = 5;            // Máximo de perdas consecutivas
-input int    InpMaxPositionTimeMin = 10;             // Tempo máximo de posição (minutos)
+input double InpMaxRiskPerTrade = 0.01;                  // Risco máximo por trade (%)
+input double InpMaxDailyLoss = 0.03;                     // Perda máxima diária (%)
+input int    InpMaxConsecutiveLosses = 5;                // Máximo de perdas consecutivas
+input int    InpMaxPositionTimeMin = 10;                 // Tempo máximo de posição (minutos)
 
 input group "=== CONFIGURAÇÕES DE IA ==="
-input double InpMinConfidence = 0.7;                 // Confiança mínima da IA
-input int    InpSignalTimeoutSec = 5;                // Timeout do sinal da IA (segundos)
-input bool   InpEnableAI = true;                     // Habilitar processamento de IA
+input double InpMinConfidence = 0.7;                     // Confiança mínima da IA
+input int    InpSignalTimeoutSec = 5;                    // Timeout do sinal da IA (segundos)
+input bool   InpEnableAI = true;                         // Habilitar processamento de IA
 
 input group "=== CONFIGURAÇÕES DE COMUNICAÇÃO ==="
-input string InpCommName = "DuarteScalper_Comm";     // Nome da comunicação
-input bool   InpDebugMode = false;                   // Modo debug
+input string InpCommName = "DuarteScalper_Comm";         // Nome da comunicação
+input bool   InpDebugMode = false;                       // Modo debug
 
 input group "=== CONFIGURAÇÕES DO PAINEL ==="
-input bool   InpShowPanel = true;                    // Mostrar painel gráfico
-input int    InpPanelPosX = 10;                      // Posição X do painel
-input int    InpPanelPosY = 30;                      // Posição Y do painel
+input bool   InpShowPanel = true;                        // Mostrar painel gráfico
+input int    InpPanelPosX = 10;                         // Posição X do painel
+input int    InpPanelPosY = 30;                         // Posição Y do painel
 
 //+------------------------------------------------------------------+
 //| Global variables                                                 |
 //+------------------------------------------------------------------+
-CDuarteCommunication* g_comm = NULL;                 // Comunicação com Python
-CTrade g_trade;                                      // Objeto de negociação
-CSymbolInfo g_symbolInfo;                            // Informações do símbolo
-CPositionInfo g_positionInfo;                        // Informações de posição
-CAccountInfo g_accountInfo;                          // Informações da conta
+CDuarteCommunication* g_comm = NULL;                     // Comunicação com Python
+CTrade g_trade;                                          // Objeto de negociação
+CSymbolInfo g_symbolInfo;                                // Informações do símbolo
+CPositionInfo g_positionInfo;                            // Informações de posição
+CAccountInfo g_accountInfo;                              // Informações da conta
 
 // Arrays de símbolos
 string g_symbols[];
@@ -96,7 +98,7 @@ int OnInit()
 {
     Print("=== INICIANDO DUARTE-SCALPER ===");
     Print("Versão: ", "1.00");
-    Print("Símbolos: ", InpSymbols);
+    Print("Prefixos de símbolos: ", InpSymbolsPrefix);
     Print("Magic Number: ", InpMagicNumber);
     
     // Verificar se já há outra instância rodando
@@ -127,10 +129,10 @@ int OnInit()
     g_trade.SetDeviationInPoints(10);
     g_trade.SetTypeFilling(ORDER_FILLING_FOK);
     
-    // Parse símbolos
-    if (!ParseSymbols())
+    // Buscar símbolos automaticamente
+    if (!FindSymbolsByPattern())
     {
-        Print("ERRO: Falha ao processar símbolos");
+        Print("ERRO: Falha ao encontrar símbolos");
         return INIT_FAILED;
     }
     
@@ -142,7 +144,7 @@ int OnInit()
             Print("ERRO: Símbolo inválido: ", g_symbols[i]);
             return INIT_FAILED;
         }
-        Print("✅ Símbolo verificado: ", g_symbols[i]);
+        Print("✅ Símbolo encontrado: ", g_symbols[i]);
     }
     
     // Inicializar estatísticas
@@ -293,52 +295,129 @@ void OnChartEvent(const int id,
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
-//| Parse símbolos de entrada                                        |
+//| Buscar símbolos por padrão (suporta wildcards)                  |
 //+------------------------------------------------------------------+
-bool ParseSymbols()
+bool FindSymbolsByPattern()
 {
-    string symbols_str = InpSymbols;
+    string patterns[];
     
-    // Contar símbolos
-    g_symbolsCount = 1;
-    for (int i = 0; i < StringLen(symbols_str); i++)
+    // Parse padrões de entrada
+    string patterns_str = InpSymbolsPrefix;
+    int patterns_count = 1;
+    
+    // Contar padrões
+    for (int i = 0; i < StringLen(patterns_str); i++)
     {
-        if (StringGetCharacter(symbols_str, i) == ',')
-            g_symbolsCount++;
+        if (StringGetCharacter(patterns_str, i) == ',')
+            patterns_count++;
     }
     
-    // Redimensionar array
-    ArrayResize(g_symbols, g_symbolsCount);
+    ArrayResize(patterns, patterns_count);
     
-    // Extrair símbolos
-    string current_symbol = "";
-    int symbol_index = 0;
+    // Extrair padrões
+    string current_pattern = "";
+    int pattern_index = 0;
     
-    for (int i = 0; i <= StringLen(symbols_str); i++)
+    for (int i = 0; i <= StringLen(patterns_str); i++)
     {
-        ushort char_code = StringGetCharacter(symbols_str, i);
+        ushort char_code = StringGetCharacter(patterns_str, i);
         
-        if (char_code == ',' || i == StringLen(symbols_str))
+        if (char_code == ',' || i == StringLen(patterns_str))
         {
-            // Limpar espaços
-            StringTrimLeft(current_symbol);
-            StringTrimRight(current_symbol);
+            StringTrimLeft(current_pattern);
+            StringTrimRight(current_pattern);
             
-            if (StringLen(current_symbol) > 0)
+            if (StringLen(current_pattern) > 0)
             {
-                g_symbols[symbol_index] = current_symbol;
-                symbol_index++;
+                patterns[pattern_index] = current_pattern;
+                pattern_index++;
             }
             
-            current_symbol = "";
+            current_pattern = "";
         }
         else
         {
-            current_symbol += CharToString((char)char_code);
+            current_pattern += CharToString((char)char_code);
         }
     }
     
-    return g_symbolsCount > 0;
+    // Buscar símbolos que matching os padrões
+    string found_symbols[];
+    int found_count = 0;
+    
+    Print("Buscando símbolos que correspondem aos padrões...");
+    
+    for (int i = 0; i < SymbolsTotal(true); i++)
+    {
+        string symbol = SymbolName(i, true);
+        
+        // Verificar contra cada padrão
+        for (int j = 0; j < ArraySize(patterns); j++)
+        {
+            if (MatchesPattern(symbol, patterns[j]))
+            {
+                ArrayResize(found_symbols, found_count + 1);
+                found_symbols[found_count] = symbol;
+                found_count++;
+                Print("   ✅ Encontrado: ", symbol, " (padrão: ", patterns[j], ")");
+                break;
+            }
+        }
+    }
+    
+    // Atualizar array global
+    g_symbolsCount = found_count;
+    ArrayResize(g_symbols, g_symbolsCount);
+    
+    for (int i = 0; i < g_symbolsCount; i++)
+    {
+        g_symbols[i] = found_symbols[i];
+    }
+    
+    if (g_symbolsCount == 0)
+    {
+        Print("❌ Nenhum símbolo encontrado para os padrões: ", InpSymbolsPrefix);
+        return false;
+    }
+    
+    Print("Total de símbolos encontrados: ", g_symbolsCount);
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Verificar se símbolo corresponde ao padrão                       |
+//+------------------------------------------------------------------+
+bool MatchesPattern(const string symbol, const string pattern)
+{
+    // Suporte simples a wildcards
+    if (StringFind(pattern, "*") >= 0)
+    {
+        // Remover * do final/início para matching
+        string clean_pattern = pattern;
+        StringReplace(clean_pattern, "*", "");
+        
+        // Se padrão termina com *, verificar se símbolo começa com padrão
+        if (StringFind(pattern, "*") == StringLen(pattern) - 1)
+        {
+            string prefix = StringSubstr(pattern, 0, StringLen(pattern) - 1);
+            return StringFind(symbol, prefix) == 0;
+        }
+        
+        // Se padrão começa com *, verificar se símbolo termina com padrão
+        if (StringFind(pattern, "*") == 0)
+        {
+            string suffix = StringSubstr(pattern, 1);
+            return StringFind(symbol, suffix) == StringLen(symbol) - StringLen(suffix);
+        }
+        
+        // Wildcard no meio
+        return StringFind(symbol, clean_pattern) >= 0;
+    }
+    else
+    {
+        // Matching exato
+        return symbol == pattern;
+    }
 }
 
 //+------------------------------------------------------------------+
@@ -692,7 +771,7 @@ void CheckRiskManagement()
 }
 
 //+------------------------------------------------------------------+
-//| Calcular P&L diário                                             |
+//| Calcular P&L diário - CORRIGIDO                                 |
 //+------------------------------------------------------------------+
 void CalculateDailyPnL()
 {
@@ -706,16 +785,20 @@ void CalculateDailyPnL()
     dt.sec = 0;
     datetime todayStart = StructToTime(dt);
     
-    // Calcular P&L das posições fechadas hoje
-    for (int i = PositionsHistoryTotal() - 1; i >= 0; i--)
+    // Selecionar histórico de hoje
+    if (HistorySelect(todayStart, TimeCurrent()))
     {
-        ulong ticket = PositionGetTicket(i);
-        if (ticket > 0)
+        // Verificar deals fechados hoje
+        CDealInfo deal;
+        for (int i = 0; i < HistoryDealsTotal(); i++)
         {
-            if (PositionGetInteger(POSITION_TIME) >= todayStart &&
-                PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+            if (deal.SelectByIndex(i))
             {
-                g_dailyPnL += PositionGetDouble(POSITION_PROFIT);
+                if (deal.Magic() == InpMagicNumber && 
+                    deal.DealType() != DEAL_TYPE_BALANCE)
+                {
+                    g_dailyPnL += deal.Profit();
+                }
             }
         }
     }
@@ -723,12 +806,11 @@ void CalculateDailyPnL()
     // Somar P&L das posições abertas
     for (int i = 0; i < PositionsTotal(); i++)
     {
-        ulong ticket = PositionGetTicket(i);
-        if (ticket > 0)
+        if (g_positionInfo.SelectByIndex(i))
         {
-            if (PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+            if (g_positionInfo.Magic() == InpMagicNumber)
             {
-                g_dailyPnL += PositionGetDouble(POSITION_PROFIT);
+                g_dailyPnL += g_positionInfo.Profit();
             }
         }
     }
@@ -849,25 +931,29 @@ void CheckDailySession()
 //+------------------------------------------------------------------+
 
 // Definições do painel
-#define PANEL_WIDTH 300
-#define PANEL_HEIGHT 400
+#define PANEL_WIDTH 350
+#define PANEL_HEIGHT 450
 #define PANEL_BORDER 5
-#define LINE_HEIGHT 20
+#define LINE_HEIGHT 22
 
-// Cores do painel
-#define COLOR_PANEL_BG      C'30,30,30'
-#define COLOR_PANEL_BORDER  C'70,70,70'
-#define COLOR_TEXT_WHITE    clrWhite
-#define COLOR_TEXT_GREEN    clrLime
-#define COLOR_TEXT_RED      clrRed
-#define COLOR_TEXT_YELLOW   clrYellow
-#define COLOR_TEXT_CYAN     clrCyan
+// Cores do painel - Tema moderno
+#define COLOR_PANEL_BG      C'25,25,30'        // Cinza escuro moderno
+#define COLOR_PANEL_BORDER  C'75,75,85'        // Borda sutil
+#define COLOR_HEADER_BG     C'45,45,55'        // Header background
+#define COLOR_TEXT_WHITE    C'240,240,245'     // Branco suave
+#define COLOR_TEXT_GREEN    C'76,175,80'       // Verde moderno
+#define COLOR_TEXT_RED      C'244,67,54'       // Vermelho moderno
+#define COLOR_TEXT_YELLOW   C'255,193,7'       // Amarelo/dourado
+#define COLOR_TEXT_CYAN     C'0,188,212'       // Azul ciano
+#define COLOR_TEXT_GRAY     C'158,158,158'     // Cinza médio
+#define COLOR_BUTTON_BG     C'55,55,65'        // Background botão
+#define COLOR_BUTTON_HOVER  C'65,65,75'        // Hover botão
 
 // Objetos do painel
 string g_panelObjects[];
 
 //+------------------------------------------------------------------+
-//| Criar painel gráfico                                            |
+//| Criar painel gráfico moderno                                    |
 //+------------------------------------------------------------------+
 void CreatePanel()
 {
@@ -878,97 +964,121 @@ void CreatePanel()
     int x = InpPanelPosX;
     int y = InpPanelPosY;
     
-    // Fundo do painel
-    string objName = "DuartePanel_Background";
-    ObjectCreate(chartId, objName, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-    ObjectSetInteger(chartId, objName, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(chartId, objName, OBJPROP_YDISTANCE, y);
-    ObjectSetInteger(chartId, objName, OBJPROP_XSIZE, PANEL_WIDTH);
-    ObjectSetInteger(chartId, objName, OBJPROP_YSIZE, PANEL_HEIGHT);
-    ObjectSetInteger(chartId, objName, OBJPROP_BGCOLOR, COLOR_PANEL_BG);
-    ObjectSetInteger(chartId, objName, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-    ObjectSetInteger(chartId, objName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(chartId, objName, OBJPROP_COLOR, COLOR_PANEL_BORDER);
-    ObjectSetInteger(chartId, objName, OBJPROP_STYLE, STYLE_SOLID);
-    ObjectSetInteger(chartId, objName, OBJPROP_WIDTH, 2);
-    ObjectSetInteger(chartId, objName, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(chartId, objName, OBJPROP_HIDDEN, true);
+    // Fundo principal do painel com bordas arredondadas (simuladas)
+    CreatePanelRect("DuartePanel_Background", x, y, PANEL_WIDTH, PANEL_HEIGHT, 
+                    COLOR_PANEL_BG, COLOR_PANEL_BORDER, 2);
     
-    ArrayResize(g_panelObjects, ArraySize(g_panelObjects) + 1);
-    g_panelObjects[ArraySize(g_panelObjects) - 1] = objName;
+    // Header do painel
+    CreatePanelRect("DuartePanel_Header", x, y, PANEL_WIDTH, 45, 
+                    COLOR_HEADER_BG, COLOR_PANEL_BORDER, 1);
     
-    // Título do painel
-    CreatePanelLabel("DuartePanel_Title", "DUARTE-SCALPER v1.0", 
-                     x + 10, y + 10, COLOR_TEXT_CYAN, 12, true);
+    // Logo/Título principal
+    CreatePanelLabel("DuartePanel_Title", "🚀 DUARTE-SCALPER", 
+                     x + 15, y + 12, COLOR_TEXT_CYAN, 14, true);
     
-    // Status da conexão
-    CreatePanelLabel("DuartePanel_Status", "Status: ", 
-                     x + 10, y + 35, COLOR_TEXT_WHITE, 9);
+    CreatePanelLabel("DuartePanel_Version", "v1.0 Pro", 
+                     x + 220, y + 15, COLOR_TEXT_GRAY, 9);
     
-    // Informações da conta
+    // Status geral
+    CreatePanelLabel("DuartePanel_StatusTitle", "STATUS DO SISTEMA", 
+                     x + 15, y + 60, COLOR_TEXT_YELLOW, 11, true);
+    
+    CreatePanelLabel("DuartePanel_Status", "Sistema: ", 
+                     x + 20, y + 85, COLOR_TEXT_WHITE, 10);
+    
+    CreatePanelLabel("DuartePanel_AIStatus", "IA: ", 
+                     x + 20, y + 105, COLOR_TEXT_WHITE, 10);
+    
+    // Linha divisória
+    CreatePanelLine("DuartePanel_Line1", x + 15, y + 130, x + PANEL_WIDTH - 15, y + 130);
+    
+    // Seção da conta
+    CreatePanelLabel("DuartePanel_AccountTitle", "INFORMAÇÕES DA CONTA", 
+                     x + 15, y + 145, COLOR_TEXT_YELLOW, 11, true);
+                     
     CreatePanelLabel("DuartePanel_Account", "Conta: ", 
-                     x + 10, y + 60, COLOR_TEXT_WHITE, 9);
+                     x + 20, y + 170, COLOR_TEXT_WHITE, 10);
                      
     CreatePanelLabel("DuartePanel_Balance", "Saldo: ", 
-                     x + 10, y + 80, COLOR_TEXT_WHITE, 9);
+                     x + 20, y + 190, COLOR_TEXT_WHITE, 10);
     
     CreatePanelLabel("DuartePanel_Equity", "Patrimônio: ", 
-                     x + 10, y + 100, COLOR_TEXT_WHITE, 9);
+                     x + 20, y + 210, COLOR_TEXT_WHITE, 10);
     
     // Linha divisória
-    CreatePanelLine("DuartePanel_Line1", x + 10, y + 120, x + PANEL_WIDTH - 20, y + 120);
+    CreatePanelLine("DuartePanel_Line2", x + 15, y + 235, x + PANEL_WIDTH - 15, y + 235);
     
-    // Estatísticas de trading
-    CreatePanelLabel("DuartePanel_StatsTitle", "ESTATÍSTICAS", 
-                     x + 10, y + 130, COLOR_TEXT_YELLOW, 10, true);
+    // Seção de performance
+    CreatePanelLabel("DuartePanel_PerformanceTitle", "PERFORMANCE", 
+                     x + 15, y + 250, COLOR_TEXT_YELLOW, 11, true);
     
     CreatePanelLabel("DuartePanel_TotalTrades", "Total de Trades: ", 
-                     x + 10, y + 155, COLOR_TEXT_WHITE, 9);
+                     x + 20, y + 275, COLOR_TEXT_WHITE, 10);
                      
     CreatePanelLabel("DuartePanel_WinRate", "Taxa de Acerto: ", 
-                     x + 10, y + 175, COLOR_TEXT_WHITE, 9);
+                     x + 180, y + 275, COLOR_TEXT_WHITE, 10);
                      
     CreatePanelLabel("DuartePanel_ProfitToday", "Profit Hoje: ", 
-                     x + 10, y + 195, COLOR_TEXT_WHITE, 9);
+                     x + 20, y + 295, COLOR_TEXT_WHITE, 10);
                      
     CreatePanelLabel("DuartePanel_DrawdownCurrent", "Drawdown: ", 
-                     x + 10, y + 215, COLOR_TEXT_WHITE, 9);
+                     x + 180, y + 295, COLOR_TEXT_WHITE, 10);
     
     // Linha divisória
-    CreatePanelLine("DuartePanel_Line2", x + 10, y + 235, x + PANEL_WIDTH - 20, y + 235);
+    CreatePanelLine("DuartePanel_Line3", x + 15, y + 320, x + PANEL_WIDTH - 15, y + 320);
     
-    // Status da IA
-    CreatePanelLabel("DuartePanel_AITitle", "INTELIGÊNCIA ARTIFICIAL", 
-                     x + 10, y + 245, COLOR_TEXT_YELLOW, 10, true);
+    // Seção de posições
+    CreatePanelLabel("DuartePanel_PositionsTitle", "POSIÇÕES ATIVAS", 
+                     x + 15, y + 335, COLOR_TEXT_YELLOW, 11, true);
                      
-    CreatePanelLabel("DuartePanel_AIStatus", "IA Status: ", 
-                     x + 10, y + 270, COLOR_TEXT_WHITE, 9);
-                     
-    CreatePanelLabel("DuartePanel_LastSignal", "Último Sinal: ", 
-                     x + 10, y + 290, COLOR_TEXT_WHITE, 9);
+    CreatePanelLabel("DuartePanel_Positions", "Nenhuma posição aberta", 
+                     x + 20, y + 360, COLOR_TEXT_GRAY, 10);
     
-    // Posições abertas
-    CreatePanelLabel("DuartePanel_PositionsTitle", "POSIÇÕES ABERTAS", 
-                     x + 10, y + 315, COLOR_TEXT_YELLOW, 10, true);
-                     
-    CreatePanelLabel("DuartePanel_Positions", "Nenhuma posição", 
-                     x + 10, y + 340, COLOR_TEXT_WHITE, 9);
+    CreatePanelLabel("DuartePanel_PositionsProfit", "P&L Total: --", 
+                     x + 20, y + 380, COLOR_TEXT_WHITE, 10);
     
-    // Controles
-    CreatePanelButton("DuartePanel_BtnStartStop", "PARAR", 
-                      x + 10, y + 365, 80, 25, COLOR_TEXT_RED);
+    // Controles modernos
+    CreateModernButton("DuartePanel_BtnStartStop", "⏸️ PAUSAR", 
+                       x + 15, y + 410, 100, 30, COLOR_TEXT_RED);
                       
-    CreatePanelButton("DuartePanel_BtnCloseAll", "FECHAR TODAS", 
-                      x + 100, y + 365, 100, 25, COLOR_TEXT_YELLOW);
+    CreateModernButton("DuartePanel_BtnCloseAll", "❌ FECHAR", 
+                       x + 125, y + 410, 100, 30, COLOR_TEXT_YELLOW);
+                       
+    CreateModernButton("DuartePanel_BtnRefresh", "🔄 ATUALIZAR", 
+                       x + 235, y + 410, 100, 30, COLOR_TEXT_CYAN);
     
-    Print("✅ Painel gráfico criado");
+    Print("✅ Painel gráfico moderno criado");
 }
 
 //+------------------------------------------------------------------+
-//| Criar label do painel                                           |
+//| Criar retângulo do painel                                       |
+//+------------------------------------------------------------------+
+void CreatePanelRect(string name, int x, int y, int width, int height, 
+                     color bgColor, color borderColor, int borderWidth)
+{
+    long chartId = ChartID();
+    
+    ObjectCreate(chartId, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+    ObjectSetInteger(chartId, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(chartId, name, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(chartId, name, OBJPROP_XSIZE, width);
+    ObjectSetInteger(chartId, name, OBJPROP_YSIZE, height);
+    ObjectSetInteger(chartId, name, OBJPROP_BGCOLOR, bgColor);
+    ObjectSetInteger(chartId, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+    ObjectSetInteger(chartId, name, OBJPROP_COLOR, borderColor);
+    ObjectSetInteger(chartId, name, OBJPROP_WIDTH, borderWidth);
+    ObjectSetInteger(chartId, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(chartId, name, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(chartId, name, OBJPROP_HIDDEN, true);
+    
+    AddObjectToPanel(name);
+}
+
+//+------------------------------------------------------------------+
+//| Criar label moderno do painel                                   |
 //+------------------------------------------------------------------+
 void CreatePanelLabel(string name, string text, int x, int y, 
-                     color textColor, int fontSize = 9, bool bold = false)
+                     color textColor, int fontSize = 10, bool bold = false)
 {
     long chartId = ChartID();
     
@@ -983,71 +1093,84 @@ void CreatePanelLabel(string name, string text, int x, int y,
     ObjectSetInteger(chartId, name, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(chartId, name, OBJPROP_HIDDEN, true);
     
-    ArrayResize(g_panelObjects, ArraySize(g_panelObjects) + 1);
-    g_panelObjects[ArraySize(g_panelObjects) - 1] = name;
+    AddObjectToPanel(name);
 }
 
 //+------------------------------------------------------------------+
-//| Criar linha do painel                                           |
+//| Criar linha moderna do painel                                   |
 //+------------------------------------------------------------------+
 void CreatePanelLine(string name, int x1, int y1, int x2, int y2)
 {
     long chartId = ChartID();
     
-    ObjectCreate(chartId, name, OBJ_HLINE, 0, 0, 0);
-    ObjectSetInteger(chartId, name, OBJPROP_COLOR, COLOR_PANEL_BORDER);
-    ObjectSetInteger(chartId, name, OBJPROP_STYLE, STYLE_SOLID);
-    ObjectSetInteger(chartId, name, OBJPROP_WIDTH, 1);
+    // Criar como rectângulo para ter melhor controle
+    ObjectCreate(chartId, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+    ObjectSetInteger(chartId, name, OBJPROP_XDISTANCE, x1);
+    ObjectSetInteger(chartId, name, OBJPROP_YDISTANCE, y1);
+    ObjectSetInteger(chartId, name, OBJPROP_XSIZE, x2 - x1);
+    ObjectSetInteger(chartId, name, OBJPROP_YSIZE, 1);
+    ObjectSetInteger(chartId, name, OBJPROP_BGCOLOR, COLOR_PANEL_BORDER);
+    ObjectSetInteger(chartId, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+    ObjectSetInteger(chartId, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(chartId, name, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(chartId, name, OBJPROP_HIDDEN, true);
     
-    ArrayResize(g_panelObjects, ArraySize(g_panelObjects) + 1);
-    g_panelObjects[ArraySize(g_panelObjects) - 1] = name;
+    AddObjectToPanel(name);
 }
 
 //+------------------------------------------------------------------+
-//| Criar botão do painel                                           |
+//| Criar botão moderno                                             |
 //+------------------------------------------------------------------+
-void CreatePanelButton(string name, string text, int x, int y, 
-                      int width, int height, color textColor)
+void CreateModernButton(string name, string text, int x, int y, 
+                        int width, int height, color textColor)
 {
     long chartId = ChartID();
     
-    // Fundo do botão
+    // Background do botão com gradiente simulado
     ObjectCreate(chartId, name + "_BG", OBJ_RECTANGLE_LABEL, 0, 0, 0);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_XDISTANCE, x);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_YDISTANCE, y);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_XSIZE, width);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_YSIZE, height);
-    ObjectSetInteger(chartId, name + "_BG", OBJPROP_BGCOLOR, C'50,50,50');
+    ObjectSetInteger(chartId, name + "_BG", OBJPROP_BGCOLOR, COLOR_BUTTON_BG);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_BORDER_TYPE, BORDER_FLAT);
-    ObjectSetInteger(chartId, name + "_BG", OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_COLOR, COLOR_PANEL_BORDER);
-    ObjectSetInteger(chartId, name + "_BG", OBJPROP_STYLE, STYLE_SOLID);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_WIDTH, 1);
+    ObjectSetInteger(chartId, name + "_BG", OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_SELECTABLE, true);
     ObjectSetInteger(chartId, name + "_BG", OBJPROP_HIDDEN, true);
     
-    // Texto do botão
+    // Texto do botão centralizado
     ObjectCreate(chartId, name, OBJ_LABEL, 0, 0, 0);
     ObjectSetString(chartId, name, OBJPROP_TEXT, text);
-    ObjectSetInteger(chartId, name, OBJPROP_XDISTANCE, x + width/2 - StringLen(text)*3);
-    ObjectSetInteger(chartId, name, OBJPROP_YDISTANCE, y + height/2 - 7);
+    // Centralizar text
+    int textLen = StringLen(text);
+    int textX = x + (width - textLen * 6) / 2;
+    int textY = y + (height - 12) / 2;
+    ObjectSetInteger(chartId, name, OBJPROP_XDISTANCE, textX);
+    ObjectSetInteger(chartId, name, OBJPROP_YDISTANCE, textY);
     ObjectSetInteger(chartId, name, OBJPROP_COLOR, textColor);
-    ObjectSetInteger(chartId, name, OBJPROP_FONTSIZE, 9);
+    ObjectSetInteger(chartId, name, OBJPROP_FONTSIZE, 10);
     ObjectSetString(chartId, name, OBJPROP_FONT, "Arial Bold");
     ObjectSetInteger(chartId, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
     ObjectSetInteger(chartId, name, OBJPROP_SELECTABLE, false);
     ObjectSetInteger(chartId, name, OBJPROP_HIDDEN, true);
     
-    ArrayResize(g_panelObjects, ArraySize(g_panelObjects) + 1);
-    g_panelObjects[ArraySize(g_panelObjects) - 1] = name + "_BG";
-    ArrayResize(g_panelObjects, ArraySize(g_panelObjects) + 1);
-    g_panelObjects[ArraySize(g_panelObjects) - 1] = name;
+    AddObjectToPanel(name + "_BG");
+    AddObjectToPanel(name);
 }
 
 //+------------------------------------------------------------------+
-//| Atualizar painel                                                |
+//| Adicionar objeto ao panel                                       |
+//+------------------------------------------------------------------+
+void AddObjectToPanel(string objectName)
+{
+    ArrayResize(g_panelObjects, ArraySize(g_panelObjects) + 1);
+    g_panelObjects[ArraySize(g_panelObjects) - 1] = objectName;
+}
+
+//+------------------------------------------------------------------+
+//| Atualizar painel com dados dinâmicos                           |
 //+------------------------------------------------------------------+
 void UpdatePanel()
 {
@@ -1056,54 +1179,55 @@ void UpdatePanel()
     
     long chartId = ChartID();
     
-    // Atualizar status
-    string status = g_isRunning ? "🟢 ATIVO" : "🔴 PARADO";
-    if (g_aiConnected)
-        status += " | IA: 🟢";
-    else
-        status += " | IA: 🔴";
+    // Atualizar status do sistema
+    string systemStatus = g_isRunning ? "🟢 ATIVO" : "🔴 PARADO";
+    string aiStatus = g_aiConnected ? "🟢 CONECTADA" : "🔴 OFFLINE";
     
-    ObjectSetString(chartId, "DuartePanel_Status", OBJPROP_TEXT, "Status: " + status);
+    ObjectSetString(chartId, "DuartePanel_Status", OBJPROP_TEXT, 
+                    "Sistema: " + systemStatus);
+    
+    ObjectSetString(chartId, "DuartePanel_AIStatus", OBJPROP_TEXT, 
+                    "IA: " + aiStatus);
     
     // Atualizar informações da conta
     ObjectSetString(chartId, "DuartePanel_Account", OBJPROP_TEXT, 
                     "Conta: " + IntegerToString(g_accountInfo.Login()));
     
     ObjectSetString(chartId, "DuartePanel_Balance", OBJPROP_TEXT, 
-                    StringFormat("Saldo: %.2f %s", g_accountInfo.Balance(), g_accountInfo.Currency()));
+                    StringFormat("Saldo: %.2f", g_accountInfo.Balance()));
     
     ObjectSetString(chartId, "DuartePanel_Equity", OBJPROP_TEXT, 
-                    StringFormat("Patrimônio: %.2f %s", g_accountInfo.Equity(), g_accountInfo.Currency()));
+                    StringFormat("Patrimônio: %.2f", g_accountInfo.Equity()));
     
-    // Atualizar estatísticas
+    // Atualizar performance
     ObjectSetString(chartId, "DuartePanel_TotalTrades", OBJPROP_TEXT, 
-                    "Total de Trades: " + IntegerToString(g_stats.totalTrades));
+                    "Trades: " + IntegerToString(g_stats.totalTrades));
     
-    double winRate = g_stats.totalTrades > 0 ? (double)g_stats.winTrades / g_stats.totalTrades * 100 : 0;
+    double winRate = g_stats.totalTrades > 0 ? 
+                    (double)g_stats.winTrades / g_stats.totalTrades * 100 : 0;
     ObjectSetString(chartId, "DuartePanel_WinRate", OBJPROP_TEXT, 
-                    StringFormat("Taxa de Acerto: %.1f%%", winRate));
+                    StringFormat("Win: %.1f%%", winRate));
     
-    // Colorir profit de acordo com valor
+    // Profit de hoje com cores
     color profitColor = g_dailyPnL >= 0 ? COLOR_TEXT_GREEN : COLOR_TEXT_RED;
+    string profitSymbol = g_dailyPnL >= 0 ? "💰" : "📉";
     ObjectSetString(chartId, "DuartePanel_ProfitToday", OBJPROP_TEXT, 
-                    StringFormat("Profit Hoje: %.2f", g_dailyPnL));
+                    StringFormat("%s %.2f", profitSymbol, g_dailyPnL));
     ObjectSetInteger(chartId, "DuartePanel_ProfitToday", OBJPROP_COLOR, profitColor);
     
-    // Atualizar drawdown
+    // Drawdown
     double drawdownPercent = g_accountInfo.Balance() > 0 ? 
                             (g_stats.currentDrawdown / g_accountInfo.Balance()) * 100 : 0;
+    color drawdownColor = drawdownPercent > 2.0 ? COLOR_TEXT_RED : COLOR_TEXT_WHITE;
     ObjectSetString(chartId, "DuartePanel_DrawdownCurrent", OBJPROP_TEXT, 
-                    StringFormat("Drawdown: %.2f%%", drawdownPercent));
-    
-    // Atualizar status da IA
-    string aiStatus = g_aiConnected ? "🟢 CONECTADA" : "🔴 DESCONECTADA";
-    ObjectSetString(chartId, "DuartePanel_AIStatus", OBJPROP_TEXT, "IA Status: " + aiStatus);
+                    StringFormat("DD: %.2f%%", drawdownPercent));
+    ObjectSetInteger(chartId, "DuartePanel_DrawdownCurrent", OBJPROP_COLOR, drawdownColor);
     
     // Atualizar posições
     UpdatePositionsDisplay();
     
-    // Atualizar texto do botão Start/Stop
-    string buttonText = g_isRunning ? "PARAR" : "INICIAR";
+    // Atualizar botões
+    string buttonText = g_isRunning ? "⏸️ PAUSAR" : "▶️ INICIAR";
     color buttonColor = g_isRunning ? COLOR_TEXT_RED : COLOR_TEXT_GREEN;
     ObjectSetString(chartId, "DuartePanel_BtnStartStop", OBJPROP_TEXT, buttonText);
     ObjectSetInteger(chartId, "DuartePanel_BtnStartStop", OBJPROP_COLOR, buttonColor);
@@ -1112,41 +1236,55 @@ void UpdatePanel()
 }
 
 //+------------------------------------------------------------------+
-//| Atualizar display de posições                                   |
+//| Atualizar display de posições melhorado                         |
 //+------------------------------------------------------------------+
 void UpdatePositionsDisplay()
 {
     long chartId = ChartID();
     string positionsText = "";
+    double totalProfit = 0.0;
     int positionsCount = 0;
     
-    // Contar posições do robô
+    // Contar e sumarizar posições
     for (int i = 0; i < PositionsTotal(); i++)
     {
-        if (PositionGetTicket(i) > 0)
+        if (g_positionInfo.SelectByIndex(i))
         {
-            if (PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+            if (g_positionInfo.Magic() == InpMagicNumber)
             {
                 positionsCount++;
-                string symbol = PositionGetString(POSITION_SYMBOL);
-                double profit = PositionGetDouble(POSITION_PROFIT);
-                string type = PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "BUY" : "SELL";
+                string symbol = g_positionInfo.Symbol();
+                double profit = g_positionInfo.Profit();
+                totalProfit += profit;
+                string type = g_positionInfo.PositionType() == POSITION_TYPE_BUY ? "📈" : "📉";
                 
                 if (positionsText != "")
-                    positionsText += "\n";
+                    positionsText += " | ";
                     
-                color profitColor = profit >= 0 ? COLOR_TEXT_GREEN : COLOR_TEXT_RED;
-                positionsText += StringFormat("%s %s: %.2f", symbol, type, profit);
+                positionsText += StringFormat("%s %s", symbol, type);
             }
         }
     }
     
     if (positionsCount == 0)
     {
-        positionsText = "Nenhuma posição";
+        positionsText = "Nenhuma posição aberta";
+        ObjectSetInteger(chartId, "DuartePanel_Positions", OBJPROP_COLOR, COLOR_TEXT_GRAY);
+    }
+    else
+    {
+        positionsText = StringFormat("%d posições: %s", positionsCount, positionsText);
+        ObjectSetInteger(chartId, "DuartePanel_Positions", OBJPROP_COLOR, COLOR_TEXT_WHITE);
     }
     
     ObjectSetString(chartId, "DuartePanel_Positions", OBJPROP_TEXT, positionsText);
+    
+    // Atualizar profit total das posições
+    color profitColor = totalProfit >= 0 ? COLOR_TEXT_GREEN : COLOR_TEXT_RED;
+    string profitSymbol = totalProfit >= 0 ? "💰" : "📉";
+    ObjectSetString(chartId, "DuartePanel_PositionsProfit", OBJPROP_TEXT, 
+                    StringFormat("P&L Total: %s %.2f", profitSymbol, totalProfit));
+    ObjectSetInteger(chartId, "DuartePanel_PositionsProfit", OBJPROP_COLOR, profitColor);
 }
 
 //+------------------------------------------------------------------+
@@ -1166,18 +1304,27 @@ void DestroyPanel()
 }
 
 //+------------------------------------------------------------------+
-//| Processar eventos do painel                                     |
+//| Processar eventos do painel com efeitos visuais                 |
 //+------------------------------------------------------------------+
 void ProcessPanelEvents(const int id, const long& lparam, 
                        const double& dparam, const string& sparam)
 {
     if (id == CHARTEVENT_OBJECT_CLICK)
     {
+        long chartId = ChartID();
+        
         // Botão Start/Stop
         if (sparam == "DuartePanel_BtnStartStop_BG")
         {
             g_isRunning = !g_isRunning;
             string status = g_isRunning ? "retomado" : "pausado";
+            
+            // Efeito visual - mudar cor temporariamente
+            ObjectSetInteger(chartId, sparam, OBJPROP_BGCOLOR, COLOR_BUTTON_HOVER);
+            ChartRedraw();
+            Sleep(150);
+            ObjectSetInteger(chartId, sparam, OBJPROP_BGCOLOR, COLOR_BUTTON_BG);
+            
             Print("🔄 Trading " + status + " pelo usuário");
             
             if (g_comm != NULL)
@@ -1188,15 +1335,36 @@ void ProcessPanelEvents(const int id, const long& lparam,
         // Botão Fechar Todas
         if (sparam == "DuartePanel_BtnCloseAll_BG")
         {
+            // Efeito visual
+            ObjectSetInteger(chartId, sparam, OBJPROP_BGCOLOR, COLOR_BUTTON_HOVER);
+            ChartRedraw();
+            Sleep(150);
+            ObjectSetInteger(chartId, sparam, OBJPROP_BGCOLOR, COLOR_BUTTON_BG);
+            
             CloseAllPositions();
             Print("🔄 Todas as posições fechadas pelo usuário");
             
             if (g_comm != NULL)
-                g_comm.SendStatusUpdate("USER_CLOSE_ALL", "Todas as posições fechadas pelo usuário");
+                g_comm.SendStatusUpdate("USER_CLOSE_ALL", 
+                                       "Todas as posições fechadas pelo usuário");
+        }
+        
+        // Botão Refresh
+        if (sparam == "DuartePanel_BtnRefresh_BG")
+        {
+            // Efeito visual
+            ObjectSetInteger(chartId, sparam, OBJPROP_BGCOLOR, COLOR_BUTTON_HOVER);
+            ChartRedraw();
+            Sleep(150);
+            ObjectSetInteger(chartId, sparam, OBJPROP_BGCOLOR, COLOR_BUTTON_BG);
+            
+            // Forçar atualização do painel
+            UpdatePanel();
+            Print("🔄 Painel atualizado manualmente");
         }
         
         // Remover seleção do objeto
-        ObjectSetInteger(ChartID(), sparam, OBJPROP_STATE, false);
+        ObjectSetInteger(chartId, sparam, OBJPROP_STATE, false);
         ChartRedraw();
     }
 }
