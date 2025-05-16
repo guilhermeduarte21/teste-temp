@@ -1,9 +1,8 @@
 {
   "mt5_path": "C:\\Users\\guilh\\AppData\\Roaming\\MetaQuotes\\Terminal\\FB9A56D617EDDDFE29EE54EBEFFE96C1\\MQL5",
-  "last_deployment": "2025-05-15T20:46:25.322245",
+  "last_deployment": "2025-05-15T21:07:55.648114",
   "deployed_files": [
     "C:\\Users\\guilh\\AppData\\Roaming\\MetaQuotes\\Terminal\\FB9A56D617EDDDFE29EE54EBEFFE96C1\\MQL5\\Experts\\DuarteScalper\\Duarte-Scalper.mq5",
-    "C:\\Users\\guilh\\AppData\\Roaming\\MetaQuotes\\Terminal\\FB9A56D617EDDDFE29EE54EBEFFE96C1\\MQL5\\Experts\\DuarteScalper\\DuarteScalperBase.mq5",
     "C:\\Users\\guilh\\AppData\\Roaming\\MetaQuotes\\Terminal\\FB9A56D617EDDDFE29EE54EBEFFE96C1\\MQL5\\Include\\DuarteScalper\\Communication.mqh"
   ],
   "project_version": "1.0.0",
